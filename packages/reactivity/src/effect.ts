@@ -142,6 +142,7 @@ export interface ReactiveEffectRunner<T = any> {
   effect: ReactiveEffect
 }
 
+// effect方法
 export function effect<T = any>(
   fn: () => T,
   options?: ReactiveEffectOptions
@@ -151,6 +152,7 @@ export function effect<T = any>(
   }
 
   const _effect = new ReactiveEffect(fn)
+  // 这个选项适用于处理
   if (options) {
     extend(_effect, options)
     if (options.scope) recordEffectScope(_effect, options.scope)

@@ -4,6 +4,10 @@ import { warn } from './warning'
 let activeEffectScope: EffectScope | undefined
 const effectScopeStack: EffectScope[] = []
 
+/**
+ * 创建一个effect作用域对象，
+ * 以捕获在其内部创建的响应式 effect (例如计算属性或侦听器)，使得这些 effect 可以一起被处理。
+ */
 export class EffectScope {
   active = true
   effects: ReactiveEffect[] = []

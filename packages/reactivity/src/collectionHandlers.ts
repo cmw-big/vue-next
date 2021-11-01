@@ -335,7 +335,6 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
     : isReadonly
     ? readonlyInstrumentations
     : mutableInstrumentations
-
   return (
     target: CollectionTypes,
     key: string | symbol,
@@ -348,7 +347,6 @@ function createInstrumentationGetter(isReadonly: boolean, shallow: boolean) {
     } else if (key === ReactiveFlags.RAW) {
       return target
     }
-
     return Reflect.get(
       hasOwn(instrumentations, key) && key in target
         ? instrumentations

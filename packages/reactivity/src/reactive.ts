@@ -20,22 +20,25 @@ export const enum ReactiveFlags {
   RAW = '__v_raw'
 }
 
+// Target对象上的一些标记
 export interface Target {
-  [ReactiveFlags.SKIP]?: boolean
-  [ReactiveFlags.IS_REACTIVE]?: boolean
-  [ReactiveFlags.IS_READONLY]?: boolean
-  [ReactiveFlags.RAW]?: any
+  [ReactiveFlags.SKIP]?: boolean // skip是跳过的意思，表示当前target不会被代理，直接返回相应的值。不会走gettter
+  [ReactiveFlags.IS_REACTIVE]?: boolean // 当前target是否是响应式对象。
+  [ReactiveFlags.IS_READONLY]?: boolean // 是否是只读的，如果是只读的话，target也会直接返回相应的值
+  [ReactiveFlags.RAW]?: any // 当前target是否是原始对象。
 }
 
+// 因为ts是鸭子辩型法，所有，存储的已经代理的对象的值，是Target类型就够了
 export const reactiveMap = new WeakMap<Target, any>()
 export const shallowReactiveMap = new WeakMap<Target, any>()
 export const readonlyMap = new WeakMap<Target, any>()
 export const shallowReadonlyMap = new WeakMap<Target, any>()
 
+// 代理对象target的类型
 const enum TargetType {
-  INVALID = 0,
-  COMMON = 1,
-  COLLECTION = 2
+  INVALID = 0, // 无效类型
+  COMMON = 1, // 正常类型：Object,Array
+  COLLECTION = 2 // 搜集类型。Map,Set,WeakMap,WeakSet
 }
 
 function targetTypeMap(rawType: string) {
@@ -177,7 +180,15 @@ export function shallowReadonly<T extends object>(
     shallowReadonlyMap
   )
 }
-
+/**
+ *
+ * @param target 目标对象
+ * @param isReadonly target是否是只读对象
+ * @param baseHandlers  基础的ProxyHandler
+ * @param collectionHandlers Map和Set的的特殊的ProxyHandler
+ * @param proxyMap 已经存储过的相应的缓存WeakMap
+ * @returns target本身或者被Proxy代理后的对象
+ */
 function createReactiveObject(
   target: Target,
   isReadonly: boolean,
@@ -185,14 +196,15 @@ function createReactiveObject(
   collectionHandlers: ProxyHandler<any>,
   proxyMap: WeakMap<Target, any>
 ) {
+  // 如果不是对象。就直接返回值本身。在__DEV__环境下，再给出一个警告⚠️
   if (!isObject(target)) {
     if (__DEV__) {
       console.warn(`value cannot be made reactive: ${String(target)}`)
     }
     return target
   }
-  // target is already a Proxy, return it.
-  // exception: calling readonly() on a reactive object
+  // target is already a Proxy, return it.（target如果已经被代理过了，直接返回它。防止一个对象被多次代理）
+  // exception: calling readonly() on a reactive object（例外：在一个reactive对象中调用readonly()）
   if (
     target[ReactiveFlags.RAW] &&
     !(isReadonly && target[ReactiveFlags.IS_REACTIVE])

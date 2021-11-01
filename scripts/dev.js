@@ -12,7 +12,7 @@ nr dev dom
 nr dev core --formats cjs
 
 # Can also drop all __DEV__ blocks with:
-__DEV__=false nr dev
+ vue=false nr dev
 ```
 */
 
@@ -23,7 +23,6 @@ const target = args._.length ? fuzzyMatchTarget(args._)[0] : 'vue'
 const formats = args.formats || args.f
 const sourceMap = args.sourcemap || args.s
 const commit = execa.sync('git', ['rev-parse', 'HEAD']).stdout.slice(0, 7)
-
 execa(
   'rollup',
   [
