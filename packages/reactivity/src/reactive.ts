@@ -25,7 +25,7 @@ export interface Target {
   [ReactiveFlags.SKIP]?: boolean // skip是跳过的意思，表示当前target不会被代理，直接返回相应的值。不会走gettter
   [ReactiveFlags.IS_REACTIVE]?: boolean // 当前target是否是响应式对象。
   [ReactiveFlags.IS_READONLY]?: boolean // 是否是只读的，如果是只读的话，target也会直接返回相应的值
-  [ReactiveFlags.RAW]?: any // 当前target是否是原始对象。
+  [ReactiveFlags.RAW]?: any // 被代理对象的源对象 const p = reactive(obj);p[RectiveFlags.RAW]===obj为true
 }
 
 // 因为ts是鸭子辩型法，所有，存储的已经代理的对象的值，是Target类型就够了
@@ -57,7 +57,7 @@ function targetTypeMap(rawType: string) {
 }
 
 function getTargetType(value: Target) {
-  return value[ReactiveFlags.SKIP] || !Object.isExtensible(value)
+  return value[ReactiveFlags.SKIP] || !Object.isExtensible(value) // value是否是可扩展的。在上面添加新的属性
     ? TargetType.INVALID
     : targetTypeMap(toRawType(value))
 }
@@ -203,8 +203,10 @@ function createReactiveObject(
     }
     return target
   }
-  // target is already a Proxy, return it.（target如果已经被代理过了，直接返回它。防止一个对象被多次代理）
-  // exception: calling readonly() on a reactive object（例外：在一个reactive对象中调用readonly()）
+  // target is already a Proxy, return it.（target如果已经是一个代理对象，上面一定有ReactiveFlags.RAW属性，直接返回它。代理一个代理对象）
+  // exception: calling readonly() on a reactive object（例外：在一个reactive对象中调用readonly()，
+  // 意思就是：一个额外的例子=》可以在已经被代理过的reactive对象中调用readonly）
+  // target已经被代理过（有RAW），并且不是为了[将响应式对象（有IS_REACTIVE）变为只读（isReadonly]）则直接返回
   if (
     target[ReactiveFlags.RAW] &&
     !(isReadonly && target[ReactiveFlags.IS_REACTIVE])
@@ -212,50 +214,59 @@ function createReactiveObject(
     return target
   }
   // target already has corresponding Proxy
+  // 如果对象已经被对应WeakMap的缓存过，那么就直接返回。
   const existingProxy = proxyMap.get(target)
   if (existingProxy) {
     return existingProxy
   }
   // only a whitelist of value types can be observed.
+  // 只有target类型是有效的才能被代理观测。如果不是有效的值，则直接返回target。
+  // Object，Array，Map，Set，WeakMap，WeakSet这几种中的不带SKIP属性，并且可以扩展的。
   const targetType = getTargetType(target)
   if (targetType === TargetType.INVALID) {
     return target
   }
+  // 然后就进行数据的代理。利用Proxy。根据数据类型不同，ProxyHandler对象也不同：一个collectionHandlers，一个baseHandlers
   const proxy = new Proxy(
     target,
     targetType === TargetType.COLLECTION ? collectionHandlers : baseHandlers
   )
+  // 代理完成，就在对应的缓存里存一下，然后返回这个proxy对象
   proxyMap.set(target, proxy)
   return proxy
 }
 
+// 是否是响应式对象
 export function isReactive(value: unknown): boolean {
+  // 这里的一个判断就是：因为可以用readonly(target)。target可以是响应式对象。所以，readonly对象也可以是响应式对象
   if (isReadonly(value)) {
     return isReactive((value as Target)[ReactiveFlags.RAW])
   }
   return !!(value && (value as Target)[ReactiveFlags.IS_REACTIVE])
 }
 
+// 是否是只读对象。只有判断当前value是否有IS_READONLY属性是否为true就行了
 export function isReadonly(value: unknown): boolean {
   return !!(value && (value as Target)[ReactiveFlags.IS_READONLY])
 }
-
+// 判断value是否被代理过。只用判断当前是否是reactive或者readonly就行
 export function isProxy(value: unknown): boolean {
   return isReactive(value) || isReadonly(value)
 }
-
+// 获取源对象。如果当前对象是代理对象，就递归，如果不是代理对象，就直接返回。
 export function toRaw<T>(observed: T): T {
   const raw = observed && (observed as Target)[ReactiveFlags.RAW]
   return raw ? toRaw(raw) : observed
 }
-
+//
 export function markRaw<T extends object>(value: T): T {
   def(value, ReactiveFlags.SKIP, true)
   return value
 }
-
+// 让一个值成为响应式对象。功能和reactive一样
 export const toReactive = <T extends unknown>(value: T): T =>
   isObject(value) ? reactive(value) : value
 
+// 让一个值成为只读对象。功能和readonly一样。只是在开发环境中没有警告⚠️
 export const toReadonly = <T extends unknown>(value: T): T =>
-  isObject(value) ? readonly(value as Record<any, any>) : value
+  isObject(value) ? readonly(value) : value
