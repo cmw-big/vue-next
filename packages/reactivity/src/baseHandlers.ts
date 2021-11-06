@@ -31,11 +31,13 @@ import { isRef } from './ref'
 
 const isNonTrackableKeys = /*#__PURE__*/ makeMap(`__proto__,__v_isRef,__isVue`)
 
+// 获取Symbol上值是Symbol的属性值
 const builtInSymbols = new Set(
   Object.getOwnPropertyNames(Symbol)
     .map(key => (Symbol as any)[key])
     .filter(isSymbol)
 )
+// 带有/*#__PURE__*/的表示让rollup知道，这个函数是一个纯函数。可以被tree-shaking
 
 const get = /*#__PURE__*/ createGetter()
 const shallowGet = /*#__PURE__*/ createGetter(false, true)
@@ -77,13 +79,48 @@ function createArrayInstrumentations() {
   return instrumentations
 }
 
+/**
+ * 创建一个getter函数
+ * @param isReadonly 是否创建只读的getter
+ * @param shallow 是否是浅层的getter。如果是浅层的getter的话，那么只会返回属性本身，如果不是浅层的getter，那么会代理属性
+ * @returns 一个getter函数
+ */
 function createGetter(isReadonly = false, shallow = false) {
   return function get(target: Target, key: string | symbol, receiver: object) {
     if (key === ReactiveFlags.IS_REACTIVE) {
+      // 如果key是这个属性，有下面两种情况
+      // 1. 如果是reactive/shallowReactive，那么返回值肯定是true。参数isReadonly是false。
+      // 如果是通过原型进行访问的，也是一样的会返回相应的值
       return !isReadonly
     } else if (key === ReactiveFlags.IS_READONLY) {
+      // 如果target是只读的，返回肯定是true。那么isReadonly也肯定是true。
+      // const obj = {
+      //   a: 1,
+      //   b: {
+      //     c: 2
+      //   }
+      // }
+      // const state = readonly(obj)
+      // const obj2 = Object.create(state)
+      // console.log((obj2['__v_isReadonly'].x = 23)) // 可以设置
+      // 上面这种情况，isReadonly依然是true，但是obj2['__v_isReadonly']是可以设置的。
+      // 如果是通过原型进行访问的，也是一样的会返回相应的值
       return isReadonly
     } else if (
+      // 访问RAW属性的时候：应该返回源对象。
+      // 后面的判断是为了修复通过原型访问ReactiveFlags.RAW属性，导致得到的不准确的ReactiveFlags.RAW属性。
+      // 例子： const obj = {
+      //   a: 1,
+      //   b: {
+      //     c: 2
+      //   }
+      // }
+      // const state = reactive(obj)
+      // const obj2 = Object.create(state)
+      // console.log(obj2['__v_raw']) // 应该返回undefined，而不是直接返回target本身
+      // 如果有后面的判断的话，receiver就是obj2对象。target就是obj对象。对应的Map存储的就是target对应的代理对象proxy。
+      // 如果recetive===proxy。那么说明访问__v_raw肯定不是通过原型链访问的。
+      // 就应该返回target本身。否则就当作普通属性进行操作。
       key === ReactiveFlags.RAW &&
       receiver ===
         (isReadonly
@@ -99,38 +136,39 @@ function createGetter(isReadonly = false, shallow = false) {
     }
 
     const targetIsArray = isArray(target)
-
+    // 如果是数组，并且不是只读，并且访问的属性是数组上的一些方法，那么就返回我们构造的一个新的对象上的key，相当于代理了数组上的方法
     if (!isReadonly && targetIsArray && hasOwn(arrayInstrumentations, key)) {
       return Reflect.get(arrayInstrumentations, key, receiver)
     }
 
     const res = Reflect.get(target, key, receiver)
-
+    // 如果key是Symbol类型，就看是否是Symbol上的属性。是的话，就直接返回
+    // 如果key不是sybol类型，就看是否是那几个特殊的属性。是的话就直接返回
     if (isSymbol(key) ? builtInSymbols.has(key) : isNonTrackableKeys(key)) {
       return res
     }
-
+    // 如果当前对象不是只读的话，获取了属性（调用了get）就需要搜集依赖
     if (!isReadonly) {
       track(target, TrackOpTypes.GET, key)
     }
-
+    // 如果是浅的话，直接返回当前的值
     if (shallow) {
       return res
     }
-
+    // 这个暂时没有了解到什么意思
     if (isRef(res)) {
       // ref unwrapping - does not apply for Array + integer key.
       const shouldUnwrap = !targetIsArray || !isIntegerKey(key)
       return shouldUnwrap ? res.value : res
     }
-
+    // 如果是对象的话，就把当前的res进行代理（readonly或者reactive）
     if (isObject(res)) {
       // Convert returned value into a proxy as well. we do the isObject check
       // here to avoid invalid value warning. Also need to lazy access readonly
       // and reactive here to avoid circular dependency.
       return isReadonly ? readonly(res) : reactive(res)
     }
-
+    // 如果啥都不是的话，就直接返回值。比如通过原型链进行访问的普通属性。就直接返回值。上面的所有的判断都不会走
     return res
   }
 }
@@ -138,6 +176,11 @@ function createGetter(isReadonly = false, shallow = false) {
 const set = /*#__PURE__*/ createSetter()
 const shallowSet = /*#__PURE__*/ createSetter(true)
 
+/**
+ * 创建setter的函数。
+ * @param shallow 是否是浅代理对象。默认是false
+ * @returns 返回值是setter函数。
+ */
 function createSetter(shallow = false) {
   return function set(
     target: object,
@@ -145,6 +188,7 @@ function createSetter(shallow = false) {
     value: unknown,
     receiver: object
   ): boolean {
+    // 老值
     let oldValue = (target as any)[key]
     if (!shallow) {
       value = toRaw(value)
@@ -197,6 +241,9 @@ function ownKeys(target: object): (string | symbol)[] {
   return Reflect.ownKeys(target)
 }
 
+/**
+ * 导出一个reactive的proxyHandler对象
+ */
 export const mutableHandlers: ProxyHandler<object> = {
   get,
   set,
@@ -204,7 +251,9 @@ export const mutableHandlers: ProxyHandler<object> = {
   has,
   ownKeys
 }
-
+/**
+ * 导出一个只读的proxyHandler对象
+ */
 export const readonlyHandlers: ProxyHandler<object> = {
   get: readonlyGet,
   set(target, key) {
@@ -226,7 +275,9 @@ export const readonlyHandlers: ProxyHandler<object> = {
     return true
   }
 }
-
+/**
+ * 导出一个浅层的reactive的proxyHandler对象
+ */
 export const shallowReactiveHandlers = /*#__PURE__*/ extend(
   {},
   mutableHandlers,
