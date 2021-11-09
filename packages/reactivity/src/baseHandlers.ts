@@ -48,34 +48,34 @@ const arrayInstrumentations = /*#__PURE__*/ createArrayInstrumentations()
 
 function createArrayInstrumentations() {
   const instrumentations: Record<string, Function> = {}
-  // instrument identity-sensitive Array methods to account for possible reactive
-  // values
-  ;(['includes', 'indexOf', 'lastIndexOf'] as const).forEach(key => {
-    instrumentations[key] = function (this: unknown[], ...args: unknown[]) {
-      const arr = toRaw(this) as any
-      for (let i = 0, l = this.length; i < l; i++) {
-        track(arr, TrackOpTypes.GET, i + '')
+    // instrument identity-sensitive Array methods to account for possible reactive
+    // values
+    ; (['includes', 'indexOf', 'lastIndexOf'] as const).forEach(key => {
+      instrumentations[key] = function (this: unknown[], ...args: unknown[]) {
+        const arr = toRaw(this) as any
+        for (let i = 0, l = this.length; i < l; i++) {
+          track(arr, TrackOpTypes.GET, i + '')
+        }
+        // we run the method using the original args first (which may be reactive)
+        const res = arr[key](...args)
+        if (res === -1 || res === false) {
+          // if that didn't work, run it again using raw values.
+          return arr[key](...args.map(toRaw))
+        } else {
+          return res
+        }
       }
-      // we run the method using the original args first (which may be reactive)
-      const res = arr[key](...args)
-      if (res === -1 || res === false) {
-        // if that didn't work, run it again using raw values.
-        return arr[key](...args.map(toRaw))
-      } else {
+    })
+    // instrument length-altering mutation methods to avoid length being tracked
+    // which leads to infinite loops in some cases (#2137)
+    ; (['push', 'pop', 'shift', 'unshift', 'splice'] as const).forEach(key => {
+      instrumentations[key] = function (this: unknown[], ...args: unknown[]) {
+        pauseTracking()
+        const res = (toRaw(this) as any)[key].apply(this, args)
+        resetTracking()
         return res
       }
-    }
-  })
-  // instrument length-altering mutation methods to avoid length being tracked
-  // which leads to infinite loops in some cases (#2137)
-  ;(['push', 'pop', 'shift', 'unshift', 'splice'] as const).forEach(key => {
-    instrumentations[key] = function (this: unknown[], ...args: unknown[]) {
-      pauseTracking()
-      const res = (toRaw(this) as any)[key].apply(this, args)
-      resetTracking()
-      return res
-    }
-  })
+    })
   return instrumentations
 }
 
@@ -123,14 +123,14 @@ function createGetter(isReadonly = false, shallow = false) {
       // 就应该返回target本身。否则就当作普通属性进行操作。
       key === ReactiveFlags.RAW &&
       receiver ===
-        (isReadonly
-          ? shallow
-            ? shallowReadonlyMap
-            : readonlyMap
-          : shallow
+      (isReadonly
+        ? shallow
+          ? shallowReadonlyMap
+          : readonlyMap
+        : shallow
           ? shallowReactiveMap
           : reactiveMap
-        ).get(target)
+      ).get(target)
     ) {
       return target
     }
@@ -191,14 +191,17 @@ function createSetter(shallow = false) {
     // 老值
     let oldValue = (target as any)[key]
     if (!shallow) {
-      value = toRaw(value)
-      oldValue = toRaw(oldValue)
+      value = toRaw(value) // 如果设置的是一个响应式对象的话，需要得到源对象才行。
+      oldValue = toRaw(oldValue) // 如果老值也是一个响应式的，也需要得到老的源对象才行。
       if (!isArray(target) && isRef(oldValue) && !isRef(value)) {
+        // 如果不是数组，并且老值是Ref，并且新值不是Ref。那么就把老值的value赋值给新值。
         oldValue.value = value
         return true
       }
     } else {
       // in shallow mode, objects are set as-is regardless of reactive or not
+      // 在浅层模式（shallowReadonly,shallowReactive）下，对象就是按照普通的方式进行设置。啥也不用干
+      console.log("浅层")
     }
 
     const hadKey =
