@@ -87,6 +87,8 @@ function createArrayInstrumentations() {
  */
 function createGetter(isReadonly = false, shallow = false) {
   return function get(target: Target, key: string | symbol, receiver: object) {
+    console.log("key", key);
+
     if (key === ReactiveFlags.IS_REACTIVE) {
       // 如果key是这个属性，有下面两种情况
       // 1. 如果是reactive/shallowReactive，那么返回值肯定是true。参数isReadonly是false。
@@ -143,24 +145,28 @@ function createGetter(isReadonly = false, shallow = false) {
 
     const res = Reflect.get(target, key, receiver)
     // 如果key是Symbol类型，就看是否是Symbol上的属性。是的话，就直接返回
-    // 如果key不是sybol类型，就看是否是那几个特殊的属性。是的话就直接返回
+    // 如果key不是sybol类型，就看是否是那几个特殊的属性(__proto__,__v_isRef,__isVue)。是的话就直接返回
     if (isSymbol(key) ? builtInSymbols.has(key) : isNonTrackableKeys(key)) {
       return res
     }
+
     // 如果当前对象不是只读的话，获取了属性（调用了get）就需要搜集依赖
     if (!isReadonly) {
       track(target, TrackOpTypes.GET, key)
     }
+
     // 如果是浅的话，直接返回当前的值
     if (shallow) {
       return res
     }
     // 这个暂时没有了解到什么意思
     if (isRef(res)) {
+
       // ref unwrapping - does not apply for Array + integer key.
       const shouldUnwrap = !targetIsArray || !isIntegerKey(key)
       return shouldUnwrap ? res.value : res
     }
+
     // 如果是对象的话，就把当前的res进行代理（readonly或者reactive）
     if (isObject(res)) {
       // Convert returned value into a proxy as well. we do the isObject check
@@ -201,19 +207,37 @@ function createSetter(shallow = false) {
     } else {
       // in shallow mode, objects are set as-is regardless of reactive or not
       // 在浅层模式（shallowReadonly,shallowReactive）下，对象就是按照普通的方式进行设置。啥也不用干
-      console.log("浅层")
     }
-
+    // hadKey表示之前是否有这个值。
+    // 如果是数组并且，key是Integer的话，需要判断key是否比现有的长度大，如果大，那就是肯定没有的。如果小，当作有
+    // 如果不是数组或者key不是Integer的话。判断target上是否有key这个属性。来判断是否是新增的属性。
     const hadKey =
       isArray(target) && isIntegerKey(key)
         ? Number(key) < target.length
         : hasOwn(target, key)
+
     const result = Reflect.set(target, key, value, receiver)
     // don't trigger if target is something up in the prototype chain of original
     if (target === toRaw(receiver)) {
+      // 如果target在receiver原型链中，那么就不trigger.
+      // 因为：
+      // const obj = {
+      //   name: 'John'
+      // }
+      // const state = reactive(obj)
+      // const obj2 = Object.create(state)
+      // effect(() => {
+      //   console.log('我执行') // 只会执行一次。
+      //   obj2.name
+      // })
+      // obj2.name = 'Tom' // 通过原型改变的操作，不会触发effect。因为不知道name是想表达obj2本身上的属性还是原型上的属性。
+      // 因为通过原型链访问__v_raw属性的话，值是undefined。具体原因就是因为__v_raw表示的是源对象。
+      // 如果放开的话，就会产生各种表意和边界问题。
       if (!hadKey) {
+        // 如果之前没有key的话，就是新增
         trigger(target, TriggerOpTypes.ADD, key, value)
       } else if (hasChanged(value, oldValue)) {
+        // 如果是设置的话，还要传递老值给trigger方法。
         trigger(target, TriggerOpTypes.SET, key, value, oldValue)
       }
     }

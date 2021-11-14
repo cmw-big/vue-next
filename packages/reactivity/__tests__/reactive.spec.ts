@@ -4,34 +4,42 @@ import { computed } from '../src/computed'
 import { effect } from '../src/effect'
 
 describe('reactivity/reactive', () => {
+  // 测试一个普通的对象
   test('Object', () => {
     const original = { foo: 1 }
     const observed = reactive(original)
     expect(observed).not.toBe(original)
     expect(isReactive(observed)).toBe(true)
     expect(isReactive(original)).toBe(false)
-    // get
+    // get 会访问get方法
     expect(observed.foo).toBe(1)
-    // has
+    // has 会访问has方法
     expect('foo' in observed).toBe(true)
-    // ownKeys
+    // ownKeys 会访问ownKeys方法
     expect(Object.keys(observed)).toEqual(['foo'])
+    // 这里只测试了proxyHandler的 get，has和ownKeys方法。set和delete方法没有测试。不太好测试。
+    // 
   })
-
+  // 测试原型是否变成响应式对象
   test('proto', () => {
     const obj = {}
     const reactiveObj = reactive(obj)
     expect(isReactive(reactiveObj)).toBe(true)
     // read prop of reactiveObject will cause reactiveObj[prop] to be reactive
     // @ts-ignore
+    // 这里测试一下就是：访问__proto__属性的话。它的原型不会变成响应式的。
+    // 如果变了就会出现所有对象都会是响应式的了。
     const prototype = reactiveObj['__proto__']
+    // 后面就是测试原型是否变成响应式对象了。如果变了：isReactive(otherObj)就会是true了。
     const otherObj = { data: ['a'] }
-    expect(isReactive(otherObj)).toBe(false)
+    expect(isReactive(otherObj)).toBe(false) // otherOjb不是响应式对象
     const reactiveOther = reactive(otherObj)
     expect(isReactive(reactiveOther)).toBe(true)
+    // 这里还测试了一下：变成响应式的话，数组的访问是否正常。
     expect(reactiveOther.data[0]).toBe('a')
   })
 
+  // 测试嵌套结构的响应式对象
   test('nested reactives', () => {
     const original = {
       nested: {
@@ -47,7 +55,7 @@ describe('reactivity/reactive', () => {
 
   test('observing subtypes of IterableCollections(Map, Set)', () => {
     // subtypes of Map
-    class CustomMap extends Map {}
+    class CustomMap extends Map { }
     const cmap = reactive(new CustomMap())
 
     expect(cmap instanceof Map).toBe(true)
@@ -57,7 +65,7 @@ describe('reactivity/reactive', () => {
     expect(isReactive(cmap.get('key'))).toBe(true)
 
     // subtypes of Set
-    class CustomSet extends Set {}
+    class CustomSet extends Set { }
     const cset = reactive(new CustomSet())
 
     expect(cset instanceof Set).toBe(true)
@@ -74,7 +82,7 @@ describe('reactivity/reactive', () => {
 
   test('observing subtypes of WeakCollections(WeakMap, WeakSet)', () => {
     // subtypes of WeakMap
-    class CustomMap extends WeakMap {}
+    class CustomMap extends WeakMap { }
     const cmap = reactive(new CustomMap())
 
     expect(cmap instanceof WeakMap).toBe(true)
@@ -85,7 +93,7 @@ describe('reactivity/reactive', () => {
     expect(isReactive(cmap.get(key))).toBe(true)
 
     // subtypes of WeakSet
-    class CustomSet extends WeakSet {}
+    class CustomSet extends WeakSet { }
     const cset = reactive(new CustomSet())
 
     expect(cset instanceof WeakSet).toBe(true)
@@ -187,7 +195,7 @@ describe('reactivity/reactive', () => {
     // writable
     const b = computed({
       get: () => 1,
-      set: () => {}
+      set: () => { }
     })
     const obj = reactive({ a, b })
     // check type
@@ -211,7 +219,7 @@ describe('reactivity/reactive', () => {
     bar.value++
     expect(dummy.value).toBe(2)
   })
-
+  // 测试vue的reactive报错信息。基本类型和其他的一些类型会报错。
   test('non-observable values', () => {
     const assertValue = (value: any) => {
       reactive(value)
@@ -251,7 +259,7 @@ describe('reactivity/reactive', () => {
     expect(isReactive(obj.foo)).toBe(true)
     expect(isReactive(obj.bar)).toBe(false)
   })
-
+  // 不应该观测一个不能扩展（无法在上面增添属性）的对象
   test('should not observe non-extensible objects', () => {
     const obj = reactive({
       foo: Object.preventExtensions({ a: 1 }),
@@ -263,7 +271,7 @@ describe('reactivity/reactive', () => {
     expect(isReactive(obj.bar)).toBe(false)
     expect(isReactive(obj.baz)).toBe(false)
   })
-
+  // 不应该观测带下面这个属性的对象。因为带了这个属性，这个对象就不会变成响应式对象
   test('should not observe objects with __v_skip', () => {
     const original = {
       foo: 1,
